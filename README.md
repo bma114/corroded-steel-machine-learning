@@ -1,4 +1,4 @@
-# Corroded-Steel-Reinforcement-Predictive-Machine-Learning
+# Predictive Machine Learning to Determine the Mechanical Characteristics of Corroded Reinforcing Steel
 
 ## 1.	Project Description
 This is an example implementation of nine predictive machine learning models used to estimate the yield force capacity of corroded steel bars. The models use an extensive database of 1,349 monotonic tensile tests collected from 26 experimental campaigns available in the literature. The models included in this repository are:
