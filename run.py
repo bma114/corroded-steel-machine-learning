@@ -41,30 +41,31 @@ df = load_data()
 cat_cols, num_cols, anfis_cols, out_col = col_type(df) # Separate features by type - lists
 
 
-# Encode categorical variables
-df[cat_cols] = encoder(df[cat_cols])
-df[cat_cols] = df[cat_cols].astype(object) # Convert to object
-
-
-# Dataframes for all other models except Catboost and ANFIS
-X = pd.concat([df[num_cols], df[cat_cols]], axis='columns')
-X_s = feature_scaling(X) # Normalize all features
-Y = df[out_col]
-Y = Y.to_numpy()
-
-
 # CatBoost model - Keep categorical features as strings, only encode numericals.
 X_ns = pd.DataFrame(feature_scaling(df[num_cols]))
 X_cat = pd.concat([X_ns, df[cat_cols]], axis='columns')
 X_cat = X_cat.to_numpy()
 
 
-# Feature dataframe for ANFIS model
+# Encode categorical variables for all other models
+df[cat_cols] = encoder(df[cat_cols])
+df[cat_cols] = df[cat_cols].astype(object) # Convert to object
+
+
+# Feature Dataframe for all other models except Catboost and ANFIS
+X = pd.concat([df[num_cols], df[cat_cols]], axis='columns')
+X_s = feature_scaling(X) # Normalize all features
+Y = df[out_col]
+Y = Y.to_numpy()
+
+
+# Feature Dataframe for ANFIS model
 X_ANFIS = df[anfis_cols]
 X_te_s = feature_scaling(X_ANFIS) # Normalize all features
 
+
 # Convert Datasets to PyTorch Tensors for ANFIS model
-X_te = X_te_s.astype(np.float32) 
+X_te = X_te_s.astype(np.float32)
 X_te = torch.from_numpy(X_te)
 Y_te = Y.astype(np.float32)
 Y_te = torch.from_numpy(Y_te)
@@ -78,22 +79,25 @@ Y_te = torch.from_numpy(Y_te)
 # Repeat the 10-fold cross-validation 10 times (100-fold total) reshuffling the dataset split each 10 folds.
 
 
-kf1 = KFold(n_splits=10, random_state=1, shuffle=True) # Define the split - into 10 folds
-r2, mse, rmse, mae, mape = np.zeros([100,9]), np.zeros([100,9]), np.zeros([100,9]), np.zeros([100,9]), np.zeros([100,9])
-fold_shuffle = np.random.randint(10,100,10)
+k_fold_init = 10
 
-# Use lists to combine all test sets in best performing model for model evaluation - regression, residuals, etc. (GBRT in this example).
+r2, mse, rmse, mae, mape = np.zeros([100,9]), np.zeros([100,9]), np.zeros([100,9]), np.zeros([100,9]), np.zeros([100,9])
+
+# Empty lists for combining test sets and predictions
+# Insert lists in best performing model to plot model regression, residuals, etc.
 Y_test_all = []
-y_best_all = []
+y_best_all = [] 
+
+time_start = time.time()
 
 i = 0
-time_start = time.time()
-for j in range(kf1.n_splits):
+fold_shuffle = np.random.randint(10,100,10)
+
+for j in range(k_fold_init):
     
-    # Define the fold split and reshuffle each loop.
-    kf2 = KFold(n_splits=10, random_state=fold_shuffle[j], shuffle=True)
+    kf = KFold(n_splits=10, random_state=fold_shuffle[j], shuffle=True) # Define the fold split and reshuffle each loop.
     
-    for train_index, test_index in kf2.split(X_s, Y):
+    for train_index, test_index in kf.split(X_s, Y):
         
         # All features are numerical and normalized
         X_train, X_test = X_s[train_index], X_s[test_index]
@@ -209,8 +213,8 @@ for j in range(kf1.n_splits):
 
         # After running 100 iterations, GBRT is the best performing model.
         # Record all predictions into an array for plotting
-        y_pred_gbrt_list = y_gbrt_inv.tolist()
-        y_gbrt_all += y_pred_gbrt_list
+        y_pred_best_list = y_gbrt_inv.tolist()
+        y_best_all += y_pred_best_list
 
         # Record error metrics from each fold
         r2[i,2] = r_squared(Y_inv, y_gbrt_inv)
@@ -410,7 +414,6 @@ time_end = time.time()
 print("Elapsed time: %.2f seconds" % (time_end - time_start))
 
 
-
 ############################################## MODEL ERROR AND PERFORMANCE ################################################
 
 df_r2 = pd.DataFrame(r2).rename(columns={0:'ANN', 1:'ANFIS', 2:'GBRT', 
@@ -452,7 +455,7 @@ df_r2.head(20)
 def ann_architecture(activation): # Create ANN model architecture
     ann_model = Sequential()
     ann_model.add(Dense(units = 128, input_dim=15, kernel_initializer='normal', activation='relu'))
-    ann_model.add(Dense(units = 64, kernel_initializer='normal', activation=activation))
+    ann_model.add(Dense(units = 64, kernel_initializer='normal', activation=activation)) 
     ann_model.add(Dense(1))
     ann_model.compile(optimizer='adam', loss='mse', metrics=['mse', 'mae'])    
     return ann_model
@@ -488,7 +491,7 @@ gbrt_bench.fit(X_train, Y_train.ravel())
 
 # Apply grid optimisation for other hyperparamters
 params_gbrt = {'n_estimators': [100,200,300,400,500], 
-               'learning_rate': [0.05, 0.1, 0.15, 0.2, 0.25], 
+               'learning_rate': [0.05,0.1,0.15,0.2,0.25], 
                'max_depth': [2,4,6,8], 
                'min_samples_split': [2,4,6,8]}
 
