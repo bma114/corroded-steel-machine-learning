@@ -7,8 +7,12 @@ from sklearn.preprocessing import MinMaxScaler # Normalization
 from sklearn.preprocessing import OrdinalEncoder
 
 
+##############################################################################################################################
+
+
 def load_data() -> pd.DataFrame: # load csv file
-    return pd.read_csv("Data.csv", keep_default_na=False, na_values=['_'])
+    return pd.read_excel("Data.xlsx", keep_default_na=False)
+#     return pd.read_excel("Data.xlsx", keep_default_na=False, na_values=['_'])
     # keep_default_na=False ensures data with N/A are interpretted as strings not missing numbers.
 
     
@@ -30,13 +34,13 @@ def col_type(df) -> pd.DataFrame: # Seperate features into different types
     return cat_cols, num_cols, anfis_cols, out_col
     
     
-def encoder(df):
+def encoder(df): # Encode categorical variables
     enc = OrdinalEncoder()
     df = enc.fit_transform(df)
     return df
 
 
-def feature_scaling(df):
+def feature_scaling(df): # Scale all features
     scaler = MinMaxScaler()
     df_scaled = scaler.fit_transform(df)
     return df_scaled
