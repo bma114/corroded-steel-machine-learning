@@ -39,7 +39,12 @@ The run.py file is organized in the following format:
 * Model performance and error evaluation.
 * Hyperparameter optimization.
 
-**Note:** Because of the high computational expense of running 100 cross-validation iterations, hyperparameter optimization is not included in the governing for-loop. Example code for hyperparameter optimization is provided at the end of run.py for those models not optimized within the cross-validation training loop.
+**Note:** Because of the considerable computational expense in running 100 cross-validation iterations, hyperparameter optimization is mostly excluded from the governing training loop. Example code for hyperparameter optimization is provided at the end of run.py for those models not optimized within the cross-validation training loop.
 
 The run.py script outputs a 9x100 dataframe compiling each model’s performance, evaluated against the R2, MSE, RMSE, MAE, and MAPE. No plotting is included in the current version.
 
+## 4. Related Work
+
+A similar study investigating the residual bending moment of corroded reinforcing beams can be found at: https://github.com/bma114/corroded-RC-beam-moment-capacity
+
+With the complete open-source database available at the DOI: 10.5281/zenodo.8062007.
