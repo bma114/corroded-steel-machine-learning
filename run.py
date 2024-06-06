@@ -1,40 +1,25 @@
 from sanfis import SANFIS
 from Functions import *
 
+import time
 import numpy as np
 import pandas as pd
 
-import tensorflow as tf
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import os
-import time
 
-from keras.models import Sequential
-from keras.layers import Dense, Activation
-from keras.optimizers import Adam
-from keras.wrappers.scikit_learn import KerasRegressor
-from keras import backend as K
-
-from sklearn import preprocessing
 from sklearn.model_selection import KFold
 from sklearn.model_selection import train_test_split
-from sklearn.model_selection import GridSearchCV
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.svm import SVR
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import ConstantKernel, RBF
 
-import catboost as cb
-from catboost import Pool, CatBoostRegressor
-
-from pygam import GAM, LinearGAM, s, f, te # pyGAM package for running linear regression GAMs
+import catboost as cb # CatBoost package
+# from pygam import LinearGAM, s, f # pyGAM package for linear regression GAMs
 
 
-############################################# DATA PREPARATION ###################################################
+
+
+### ========================= ### DATA PREPARATION ### ========================= ###
+
 
 # Load database
 df = load_data()
@@ -71,13 +56,21 @@ Y_te = Y.astype(np.float32)
 Y_te = torch.from_numpy(Y_te)
 
 
-############################################## MODELS ####################################################
-######## CREATE CROSS-VALIDATION LOOP ########
-# Split dataset into k-folds (10) and remove the test set (10 %). 
-# Then train all models on the same 90 % of the data, splitting this further into training and validation sets for e.g. the ANN. 
-# Reiterate the model over every fold, training and testing each model 10 times. 
-# Repeat the 10-fold cross-validation 10 times (100-fold total) reshuffling the dataset split each 10 folds.
+### ========================= ### TRAIN & TEST MODELS ### ========================= ###
+"""
 
+Train, test and evaluate each model based on the full dataset and using a Repeated K-Fold cross-validation approach. 
+
+Repeat the 10-fold cross-validation 10 times (100-fold total) reshuffling the dataset split each 10 folds.
+
+The model performance metrics over all 100-folds and all models are exported as csv files at the end of the script.
+
+Model optimization is excluded form this example to improve computational speed. However, code is provided 
+at the end of the script for example implementation of optimization for several key model types. 
+Optimization code is commented out by default. Uncomment the code to run the algorithms. 
+
+
+"""
 
 k_fold_init = 10
 
@@ -114,37 +107,23 @@ for j in range(k_fold_init):
         # Datasets for CatBoost - categorical features left as strings
         X_train_cat, X_test_cat = X_cat[train_index], X_cat[test_index]
 
-        # Compile test data from all k-folds to plot best model    
-        Y_test_list = Y_inv.tolist()
-        Y_test_all += Y_test_list
+        # Compile test data from all k-folds to plot best model
+        Y_test_all.append(Y_inv)
 
-        ############################################# NEURAL NETWORKS ###################################################
-        ################################################## ANN ##########################################################
 
-        def ann_opt(X_train, X_val, Y_train, Y_val):
 
-            def ann_architecture(): # Create ANN model architecture
+        ### ========================= ### NEURAL NETWORKS ### ========================= ###
+        # ### =============================== ### ANN ### =============================== ###
 
-                ann_model = Sequential()
-                ann_model.add(Dense(128, input_dim=15, kernel_initializer='normal', activation='relu'))
-                ann_model.add(Dense(64, kernel_initializer='normal', activation='sigmoid'))
-                ann_model.add(Dense(1))
-                ann_model.compile(optimizer='adam', loss='mse', metrics=['mse', 'mae'])  
+        # Call ANN model
+        ann_model = ann_architecture()
 
-                return ann_model
+        # Train and evaluate the model
+        history = ann_model.fit(X_train, Y_train, batch_size=25, epochs=150, verbose=0, validation_data=(X_val, Y_val))
+        ann_model.evaluate(X_test, Y_test)
 
-            ann_model = ann_architecture()
-
-            # Train and evaluate the model
-            history = ann_model.fit(X_train, Y_train, batch_size=25, epochs=150, verbose=0, validation_data=(X_val, Y_val))
-            ann_model.evaluate(X_test, Y_test)
-
-            # Generate predictions
-            y_pred_ann = ann_model.predict(X_test)
-
-            return(y_pred_ann, history, ann_model)
-
-        y_pred_ann, history, ann_model = ann_opt(X_train, X_val, Y_train, Y_val)
+        # Generate predictions
+        y_pred_ann = ann_model.predict(X_test)
 
         # Convert prediction back to original magnitude
         y_ann_inv = np.exp(y_pred_ann)
@@ -156,7 +135,9 @@ for j in range(k_fold_init):
         mae[i,0] = mean_abs_err(Y_inv, y_ann_inv)
         mape[i,0] = mean_abs_perc_err(Y_inv, y_ann_inv)
 
-        ################################################# ANFIS ##########################################################
+
+
+        ### ========================= ### ANFIS ### ========================= ###
         
         # Call ANFIS functions
         MEMBFUNCS, anfis_params = fis_params() # Set hyperparameters and membership functions through Functions.py
@@ -184,37 +165,27 @@ for j in range(k_fold_init):
         mae[i,1] = mean_abs_err(Y_inv, y_anfis_inv)
         mape[i,1] = mean_abs_perc_err(Y_inv, y_anfis_inv)
 
-        ############################################## TREE MODELS #######################################################
-        ################################################# GBRT ########################################################### 
 
-        def gbrt_opt(X_train, Y_train):
 
-            def gbrt_model(): # Add optimized hyperparameters into GBRT model
+        ### ========================= ### TREE MODELS ### ========================= ###
+        ### ============================ ### GBRT ### ============================= ### 
+        
+        # Call GBRT model
+        gbrt_model = build_gbrt()    
 
-                gbrt_model = GradientBoostingRegressor(n_estimators=400, learning_rate=0.2, max_depth=2, 
-                                                       max_leaf_nodes=5, min_samples_leaf=1, min_samples_split=8, 
-                                                       random_state=0, loss='squared_error')            
-                return gbrt_model
+        # Train the optimised model
+        gbrt_model.fit(X_train, Y_train.ravel())
 
-            gbrt_model = gbrt_model()    
+        # Predict the response 
+        y_pred_gbrt = gbrt_model.predict(X_test)
 
-            # Train the optimised model
-            gbrt_model.fit(X_train, Y_train.ravel())
-
-            # Predict the response 
-            y_pred_gbrt = gbrt_model.predict(X_test)
-
-            return y_pred_gbrt
-
-        y_pred_gbrt = gbrt_opt(X_train, Y_train)
 
         # Convert prediction back to original magnitude
         y_gbrt_inv = np.exp(y_pred_gbrt).reshape(-1,1)
 
         # After running 100 iterations, GBRT is the best performing model.
         # Record all predictions into an array for plotting
-        y_pred_best_list = y_gbrt_inv.tolist()
-        y_best_all += y_pred_best_list
+        y_best_all.append(y_gbrt_inv)
 
         # Record error metrics from each fold
         r2[i,2] = r_squared(Y_inv, y_gbrt_inv)
@@ -223,26 +194,19 @@ for j in range(k_fold_init):
         mae[i,2] = mean_abs_err(Y_inv, y_gbrt_inv)
         mape[i,2] = mean_abs_perc_err(Y_inv, y_gbrt_inv)
 
-        ################################################# CBR #########################################################
 
-        def cb_model(X_train_cat, Y_train):
 
-            cb_train = cb.Pool(X_train_cat, Y_train, cat_features=[7,8,9,10,11,12,13,14])
-            cb_test = cb.Pool(X_test_cat, Y_test, cat_features=[7,8,9,10,11,12,13,14])
+        ### ========================= ### CBR ### ========================= ###
+      
+        # Call the CBR model
+        cb_model = build_cb()
 
-            # Build model
-            cb_model = cb.CatBoostRegressor(loss_function='MAE')
-
-            # Define grid-search parameters
-            cb_grid = {'iterations': [400], 'learning_rate': [0.1], 
-                   'depth':[4], 'l2_leaf_reg': [0.5]}
-
-            # Fit the model to the hyperparameter grid-search
-            cb_model.grid_search(cb_grid, cb_train, verbose=False)
-
-            return cb_model
-
-        cb_model = cb_model(X_train_cat, Y_train)
+        # Format training and testing sets
+        cb_train = cb.Pool(X_train_cat, Y_train, cat_features=[7,8,9,10,11,12,13,14])
+        cb_test = cb.Pool(X_test_cat, Y_test, cat_features=[7,8,9,10,11,12,13,14])
+               
+        # Fit the model
+        cb_model.fit(cb_train)
 
         # Generate predictions
         y_pred_cb = cb_model.predict(X_test_cat)
@@ -257,16 +221,12 @@ for j in range(k_fold_init):
         mae[i,3] = mean_abs_err(Y_inv, y_cb_inv)
         mape[i,3] = mean_abs_perc_err(Y_inv, y_cb_inv)
 
-        #################################################### RF ############################################################
 
-        def rf_model():
 
-            rf_model = RandomForestRegressor(n_estimators=400, max_depth=3, max_features=1.0, 
-                                             min_samples_leaf=1, min_samples_split=2, random_state=25, 
-                                             bootstrap=True, n_jobs=-1, criterion='squared_error')
-            return rf_model
+        ### ========================= ### RF ### ========================= ###
 
-        rf_model = rf_model()
+        # Call RF model
+        rf_model = build_rf()
 
         # Train the model
         rf_model.fit(X_train, Y_train.ravel())
@@ -284,21 +244,16 @@ for j in range(k_fold_init):
         mae[i,4] = mean_abs_err(Y_inv, y_rf_inv)
         mape[i,4] = mean_abs_perc_err(Y_inv, y_rf_inv)
 
-        ############################################## KERNEL-BASED MACHINES ################################################
-        ####################################################### SVR #########################################################
 
-        def svr_model(X_train, Y_train):
 
-            params_svr = {'kernel': ['rbf'],
-                        'gamma': ['scale', 'auto'], 
-                        'C': [0.1,0.5,1,2,5,10,50,100,500,1000]}
+        ### ========================= ### KERNEL-BASED MACHINES ### ========================= ###
+        ### ================================== ### SVR ### ================================== ###
 
-            svr_model = GridSearchCV(SVR(), param_grid=params_svr, refit=True, verbose=False, cv=10, n_jobs=-1)
-            svr_model.fit(X_train, Y_train)
+        # Call SVR model
+        svr_model = build_svr()
 
-            return svr_model
-
-        svr_model = svr_model(X_train, Y_train.ravel())
+        # Train the model
+        svr_model.fit(X_train, Y_train.ravel())
 
         # Predict the response
         y_pred_svr = svr_model.predict(X_test)
@@ -313,20 +268,16 @@ for j in range(k_fold_init):
         mae[i,5] = mean_abs_err(Y_inv, y_svr_inv)
         mape[i,5] = mean_abs_perc_err(Y_inv, y_svr_inv)
 
-        ####################################################### GPR #########################################################
 
-        def gpr_model(X_train, Y_train):
-            kernel = ConstantKernel(1.0, (1e-1, 1e3)) * RBF(10, (1e-3, 1e3))
 
-            gpr_model = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=0.1, normalize_y=True)
+        ### ========================= ### GPR ### ========================= ###
 
-            # Fit the model
-            gpr_model.fit(X_train, Y_train)
-            gpr_params = gpr_model.kernel_.get_params() # Outputs the tune kernel function hyperparameters
+        # Call GPR model
+        gpr_model = build_gpr()
 
-            return gpr_model, gpr_params
-
-        gpr_model, gpr_params = gpr_model(X_train, Y_train)
+        # Fit the model
+        gpr_model.fit(X_train, Y_train)
+        gpr_params = gpr_model.kernel_.get_params() # Outputs the tune kernel function hyperparameters
 
         # Predict the response
         y_pred_gpr, std = gpr_model.predict(X_test, return_std=True)
@@ -341,27 +292,12 @@ for j in range(k_fold_init):
         mae[i,6]= mean_abs_err(Y_inv, y_gpr_inv)
         mape[i,6] = mean_abs_perc_err(Y_inv, y_gpr_inv)
 
-        ################################################# LINEAR MODELING ###################################################
-        #################################################### GAM ##########################################################
 
-        def gam(X_train, Y_train):
 
-            # Define gridsearch parameter ranges
-            grid_splines = np.linspace(10,30,20) # number of splines per feature
-            lams = np.random.rand(50, 15) # lambda value for smoothing penalization
-            lams = lams * 15 - 3 # Search space for lam needs 15 dimensions for a model with 15 lam terms (one per feature)
-            lams = np.exp(lams)
+        ### ========================= ### LINEAR MODELING ### ========================= ###
+        ### =============================== ### GAM ### =============================== ###
 
-            # Build the model
-            # Numerical functions given spline terms s(),
-            # Categorical variables given step function terms f().
-            gam_model = LinearGAM(s(0)+s(1)+s(2)+s(3)+s(4)+s(5)+s(6)+
-                                  f(7)+f(8)+f(9)+f(10)+f(11)+f(12)+f(13)+
-                                  f(14)).gridsearch(X_train, Y_train, n_splines=grid_splines, lam=lams)
-
-            return gam_model
-
-        gam_model = gam(X_train, Y_train)
+        gam_model = build_gam(X_train, Y_train)
 
         # Train the model
         gam_model.fit(X_train, Y_train)
@@ -379,15 +315,11 @@ for j in range(k_fold_init):
         mae[i,7] = mean_abs_err(Y_inv, y_gam_inv)
         mape[i,7] = mean_abs_perc_err(Y_inv, y_gam_inv)
 
-        ###################################################### MLR #########################################################
 
-        def mlr():
 
-            mlr_model = LinearRegression()
+        ### ========================= ### MLR ### ========================= ###
 
-            return mlr_model
-
-        mlr_model = mlr()
+        mlr_model = build_mlr()
 
         # Fit the model
         mlr_model.fit(X_train, Y_train)
@@ -411,10 +343,14 @@ for j in range(k_fold_init):
     
 
 time_end = time.time()
-print("Elapsed time: %.2f seconds" % (time_end - time_start))
+print("Elapsed time: {} minutes and {:.0f} seconds".format
+      (int((time_end - time_start) // 60), (time_end - time_start) % 60)) 
 
 
-############################################## MODEL ERROR AND PERFORMANCE ################################################
+
+
+## ========================= ### MODEL ERROR AND PERFORMANCE ### ========================= ###
+
 
 df_r2 = pd.DataFrame(r2).rename(columns={0:'ANN', 1:'ANFIS', 2:'GBRT', 
                                          3:'CBR', 4:'RF', 5:'SVR', 
@@ -438,137 +374,145 @@ df_mape = pd.DataFrame(mape).rename(columns={0:'ANN', 1:'ANFIS', 2:'GBRT',
                                          3:'CBR', 4:'RF', 5:'SVR', 
                                          6:'GPR', 7:'GAM', 8:'MLR'})
 
-# df_r2.to_csv('100-fold R2 - All Models.csv')
-# df_mse.to_csv('100-fold MSE - All Models.csv')
-# df_rmse.to_csv('100-fold RMSE - All Models.csv')
-# df_mae.to_csv('100-fold MAE - All Models.csv')
-# df_mape.to_csv('100-fold MAPE - All Models.csv')
 
-print(df_r2['MLR'].mean())
-df_r2.head(20)
+# Export model performance results to excel files
+df_r2.to_excel('100-fold R2 - All Models.xlsx')
+df_mse.to_excel('100-fold MSE - All Models.xlsx')
+df_rmse.to_excel('100-fold RMSE - All Models.xlsx')
+df_mae.to_excel('100-fold MAE - All Models.xlsx')
+df_mape.to_excel('100-fold MAPE - All Models.xlsx')
 
-
-
-######################################### HYPERPARAMETER OPTIMIZATION EXAMPLES ###########################################
-################################################### ANN OPTIMIZATION #####################################################
-
-def ann_architecture(activation): # Create ANN model architecture
-    ann_model = Sequential()
-    ann_model.add(Dense(units = 128, input_dim=15, kernel_initializer='normal', activation='relu'))
-    ann_model.add(Dense(units = 64, kernel_initializer='normal', activation=activation)) 
-    ann_model.add(Dense(1))
-    ann_model.compile(optimizer='adam', loss='mse', metrics=['mse', 'mae'])    
-    return ann_model
-
-ann_model = KerasRegressor(build_fn = ann_architecture)
-
-# GridSearchCV Optimization
-params_ann = {'batch_size': [25,50,75], 
-              'epochs': [75,100,125,150,175], 
-              'activation': ['relu', 'sigmoid']}
-
-# Fit the model to the hyperparameter grid-search
-ann_opt = GridSearchCV(estimator = ann_model, param_grid=params_ann, 
-                               scoring = 'neg_mean_absolute_error', cv=5, n_jobs=-1)
-ann_opt.fit(X_train, Y_train, verbose=0)
-
-print(" Results from ANN Grid Search " )
-print("\n The best score across ALL searched params:\n", ann_opt.best_score_)
-print("\n The best parameters across ALL searched params:\n", ann_opt.best_params_)
+print(df_r2['GBRT'].mean()) # Change 'MLR' to any model to see mean metric
+print(df_r2.head(20)) # First 20 rows R^2 dataframe
 
 
-################################################## GBRT OPTIMIZATION #####################################################
-
-def gbrt_bench(): # Create benchmark GBRT model
-    gbrt_model = GradientBoostingRegressor(n_estimators=500, learning_rate=0.1, max_depth=2, max_leaf_nodes=5,
-                                      min_samples_leaf=1, min_samples_split=2, random_state=0, loss='squared_error')
-    return gbrt_model
-
-gbrt_bench = gbrt_bench()
-
-# Train the benchmark model
-gbrt_bench.fit(X_train, Y_train.ravel())
-
-# Apply grid optimisation for other hyperparamters
-params_gbrt = {'n_estimators': [100,200,300,400,500], 
-               'learning_rate': [0.05,0.1,0.15,0.2,0.25], 
-               'max_depth': [2,4,6,8], 
-               'min_samples_split': [2,4,6,8]}
-
-# Fit the model to the hyperparameter grid-search
-gbrt_opt = GridSearchCV(estimator=gbrt_bench, param_grid=params_gbrt, cv=5, n_jobs=-1)
-gbrt_opt.fit(X_train, Y_train.ravel())
-
-print(" Results from GBRT Grid Search " )
-print("\n The best estimator across ALL searched params:\n", gbrt_opt.best_estimator_)
-print("\n The best score across ALL searched params:\n", gbrt_opt.best_score_)
-print("\n The best parameters across ALL searched params:\n", gbrt_opt.best_params_)
 
 
-################################################ CatBoost OPTIMIZATION ###################################################
 
-cb_train = cb.Pool(X_train_cat, Y_train, cat_features=[7,8,9,10,11,12,13,14])
-cb_test = cb.Pool(X_test_cat, Y_test, cat_features=[7,8,9,10,11,12,13,14])
+### ========================= ### HYPERPARAMETER OPTIMIZATION EXAMPLES ### ========================= ###
+### ================================== ### ANN OPTIMIZATION ### ==================================== ###
 
-# Build model
-cb_model = cb.CatBoostRegressor(iterations=1000, loss_function='MAE')
+# def ann_architecture(activation): # Create ANN model architecture
+#     ann_model = Sequential()
+#     ann_model.add(Dense(units = 128, input_dim=15, kernel_initializer='normal', activation='relu'))
+#     ann_model.add(Dense(units = 64, kernel_initializer='normal', activation=activation)) 
+#     ann_model.add(Dense(1))
+#     ann_model.compile(optimizer='adam', loss='mse', metrics=['mse', 'mae'])    
+#     return ann_model
 
-# Define grid-search parameters
-cb_grid = {'iterations': [300,400,500], 'learning_rate': [0.05,0.1,0.15,0.2],
-             'depth':[2,4,6,8], 'l2_leaf_reg': [0.25,0.5,1]}
+# ann_model = KerasRegressor(build_fn = ann_architecture)
 
-# Fit the model to the hyperparameter grid-search
-cb_model.grid_search(cb_grid, cb_train, verbose=False)
+# # GridSearchCV Optimization
+# params_ann = {'batch_size': [25,50,75], 
+#               'epochs': [75,100,125,150,175], 
+#               'activation': ['relu', 'sigmoid']}
 
-print("Elapsed time: %.2f seconds" % (time_end - time_start))
-print("Count of trees in model = {}".format(cb_model.tree_count_))
-print("\n The best parameters across ALL searched params:\n", cb_model.get_params())
+# # Fit the model to the hyperparameter grid-search
+# ann_opt = GridSearchCV(estimator = ann_model, param_grid=params_ann, 
+#                                scoring = 'neg_mean_absolute_error', cv=5, n_jobs=-1)
+# ann_opt.fit(X_train, Y_train, verbose=0)
 
-
-################################################### RF OPTIMIZATION #####################################################
-
-def rf_bench():
-    rf_model = RandomForestRegressor(n_estimators=500, max_depth=5, max_features='auto', min_samples_leaf=1, 
-                                     min_samples_split=2, random_state=25, n_jobs=-1, criterion='squared_error')
-    return rf_model
-
-rf_model = rf_bench()
-
-# Define grid search parameters
-params_rf = {'n_estimators': [100,200,300,400,500], 
-             'max_features': [1.0, 'sqrt', 'log2'], 
-             'max_depth': [3,4,5,6,7]}
-
-# Fit the model to the hyperparameter grid-search
-rf_opt = GridSearchCV(estimator=rf_model, param_grid=params_rf, cv=5, n_jobs=-1)
-rf_opt.fit(X_train, Y_train)
-
-print(" Results from RF Grid Search " )
-print("\n The best estimator across ALL searched params:\n", rf_opt.best_estimator_)
-print("\n The best score across ALL searched params:\n", rf_opt.best_score_)
-print("\n The best parameters across ALL searched params:\n", rf_opt.best_params_)
+# print(" Results from ANN Grid Search " )
+# print("\n The best score across ALL searched params:\n", ann_opt.best_score_)
+# print("\n The best parameters across ALL searched params:\n", ann_opt.best_params_)
 
 
-################################################### GPR OPTIMIZATION #####################################################
+
+### ========================= ### GBRT OPTIMIZATION ### ========================= ###
+
+# def gbrt_bench(): # Create benchmark GBRT model
+#     gbrt_model = GradientBoostingRegressor(n_estimators=500, learning_rate=0.1, max_depth=2, max_leaf_nodes=5,
+#                                       min_samples_leaf=1, min_samples_split=2, random_state=0, loss='squared_error')
+#     return gbrt_model
+
+# gbrt_bench = gbrt_bench()
+
+# # Train the benchmark model
+# gbrt_bench.fit(X_train, Y_train.ravel())
+
+# # Apply grid optimisation for other hyperparamters
+# params_gbrt = {'n_estimators': [100,200,300,400,500], 
+#                'learning_rate': [0.05,0.1,0.15,0.2,0.25], 
+#                'max_depth': [2,4,6,8], 
+#                'min_samples_split': [2,4,6,8]}
+
+# # Fit the model to the hyperparameter grid-search
+# gbrt_opt = GridSearchCV(estimator=gbrt_bench, param_grid=params_gbrt, cv=5, n_jobs=-1)
+# gbrt_opt.fit(X_train, Y_train.ravel())
+
+# print(" Results from GBRT Grid Search " )
+# print("\n The best estimator across ALL searched params:\n", gbrt_opt.best_estimator_)
+# print("\n The best score across ALL searched params:\n", gbrt_opt.best_score_)
+# print("\n The best parameters across ALL searched params:\n", gbrt_opt.best_params_)
+
+
+
+### ========================= ### CatBoost OPTIMIZATION ### ========================= ###
+
+# cb_train = cb.Pool(X_train_cat, Y_train, cat_features=[7,8,9,10,11,12,13,14])
+# cb_test = cb.Pool(X_test_cat, Y_test, cat_features=[7,8,9,10,11,12,13,14])
+
+# # Build model
+# cb_model = cb.CatBoostRegressor(iterations=1000, loss_function='MAE')
+
+# # Define grid-search parameters
+# cb_grid = {'iterations': [300,400,500], 'learning_rate': [0.05,0.1,0.15,0.2],
+#              'depth':[2,4,6,8], 'l2_leaf_reg': [0.25,0.5,1]}
+
+# # Fit the model to the hyperparameter grid-search
+# cb_model.grid_search(cb_grid, cb_train, verbose=False)
+
+# print("Elapsed time: %.2f seconds" % (time_end - time_start))
+# print("Count of trees in model = {}".format(cb_model.tree_count_))
+# print("\n The best parameters across ALL searched params:\n", cb_model.get_params())
+
+
+
+### ========================= ### RF OPTIMIZATION ### ========================= ###
+
+# def rf_bench():
+#     rf_model = RandomForestRegressor(n_estimators=500, max_depth=5, max_features='auto', min_samples_leaf=1, 
+#                                      min_samples_split=2, random_state=25, n_jobs=-1, criterion='squared_error')
+#     return rf_model
+
+# rf_model = rf_bench()
+
+# # Define grid search parameters
+# params_rf = {'n_estimators': [100,200,300,400,500], 
+#              'max_features': [1.0, 'sqrt', 'log2'], 
+#              'max_depth': [3,4,5,6,7]}
+
+# # Fit the model to the hyperparameter grid-search
+# rf_opt = GridSearchCV(estimator=rf_model, param_grid=params_rf, cv=5, n_jobs=-1)
+# rf_opt.fit(X_train, Y_train)
+
+# print(" Results from RF Grid Search " )
+# print("\n The best estimator across ALL searched params:\n", rf_opt.best_estimator_)
+# print("\n The best score across ALL searched params:\n", rf_opt.best_score_)
+# print("\n The best parameters across ALL searched params:\n", rf_opt.best_params_)
+
+
+
+### ========================= ### GPR OPTIMIZATION ### ========================= ###
 # The kernel hyperparameters are automatically tuned in GaussianProcessRegressor, however, the model hyperparamters still need tuning.
 # Note: return_std cannot be used with GridSearchCV.
 
 
-kernel = ConstantKernel(1.0, (1e-1, 1e3)) * RBF(10, (1e-3, 1e3))
+# kernel = ConstantKernel(1.0, (1e-1, 1e3)) * RBF(10, (1e-3, 1e3))
 
-gpr_model = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=0.1, normalize_y=True)
+# gpr_model = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, alpha=0.1, normalize_y=True)
 
-# Try gridsearchcv
-params_gpr = {'n_restarts_optimizer': [5,10,15,20], 'alpha': [0.01,0.1,1]}
+# # Try gridsearchcv
+# params_gpr = {'n_restarts_optimizer': [5,10,15,20], 'alpha': [0.01,0.1,1]}
 
-gpr_model = GridSearchCV(gpr_model, param_grid=params_gpr, cv=10, verbose=2, n_jobs=-1)
+# gpr_model = GridSearchCV(gpr_model, param_grid=params_gpr, cv=10, verbose=2, n_jobs=-1)
 
-# Fit the model
-gpr_model.fit(X_train, Y_train)
+# # Fit the model
+# gpr_model.fit(X_train, Y_train)
 
-# gpr_params = gpr_model.kernel_.get_params() # Outputs the tuned kernel function hyperparameters
+# # gpr_params = gpr_model.kernel_.get_params() # Outputs the tuned kernel function hyperparameters
 
-print("Elapsed time: %.2f seconds" % (time_end - time_start))
-print("\n The best parameters across ALL searched params:\n", gpr_model.best_params_)
-print("Optimized Kernel Hyperparameters: " )
-# print(gpr_params)
+# print("Elapsed time: %.2f seconds" % (time_end - time_start))
+# print("\n The best parameters across ALL searched params:\n", gpr_model.best_params_)
+# print("Optimized Kernel Hyperparameters: " )
+# # print(gpr_params)
