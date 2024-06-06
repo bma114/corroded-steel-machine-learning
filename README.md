@@ -39,7 +39,7 @@ Follow the instructions below to execute the script and build the models:
 3.	Using a Python environment of your choice (e.g., Jupyter Notebook, Visual Studio Code, Spyder, etc.), open the run.py file.
 4.	Check that all Python dependencies required to run the script have been installed in your Python environment. See the list below for all the necessary packages. 
 5.	Once all the necessary packages are installed, execute the run.py script to train and test the models. 
-6.	Note that due to the extensive Repeated K-fold training algorithm adopted in this study, the script will likely take between 2 to 4 hours to run entirely, depending on the CPU of the local device. 
+6.	Note that due to the extensive Repeated K-fold training algorithm adopted in this study, the script will likely take between 2 to 2.5 hours to run entirely, depending on the CPU of the local device. 
 
 
 ## 5.	Code Structure
