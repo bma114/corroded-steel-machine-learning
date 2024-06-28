@@ -60,6 +60,9 @@ The run.py script outputs a 9x100 dataframe compiling each model’s performance
 
 ## 6. Related Work
 
+The published journal article applying the machine learning models and database presented here can be accessed at: https://doi.org/10.1016/j.conbuildmat.2024.137023
+
+
 A similar study investigating the residual bending moment of corroded reinforcing beams can be found at: https://github.com/bma114/corroded-RC-beam-moment-capacity
 
 The study also includes an example application allowing users to input new corroded beam data and make predictions using the best-performing models for each response variable. It can be accessed at: https://github.com/bma114/Corroded_Beam_Bending_Prediction 
